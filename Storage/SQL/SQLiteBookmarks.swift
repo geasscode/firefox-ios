@@ -218,6 +218,10 @@ public class SQLiteBookmarks: BookmarksModelFactory {
     }
 
     public func modelForFolder(guid: String, title: String) -> Deferred<Maybe<BookmarksModel>> {
+        if guid == BookmarkRoots.FakeDesktopFolderGUID {
+            return self.modelForDesktopBookmarks()
+        }
+
         let outputTitle = titleForSpecialGUID(guid) ?? title
         return self.folderForGUID(guid, title: outputTitle)
           >>== self.modelWithRoot
@@ -626,7 +630,7 @@ public class SQLiteBookmarkMirrorStorage: BookmarkMirrorStorage {
     }
 }
 
-extension SQLiteBookmarkMirrorStorage: BookmarksModelFactory {
+extension SQLiteBookmarks {
     private func getDesktopRoots() -> Deferred<Maybe<Cursor<BookmarkNode>>> {
         // We deliberately exclude the mobile folder, because we're inverting the containment
         // relationship here.
@@ -692,52 +696,9 @@ extension SQLiteBookmarkMirrorStorage: BookmarksModelFactory {
         let folder = SQLiteBookmarkFolder(guid: guid, title: title, children: cursor)
         return deferMaybe(BookmarksModel(modelFactory: self, root: folder))
     }
+}
 
-    public func modelForFolder(folder: BookmarkFolder) -> Deferred<Maybe<BookmarksModel>> {
-        return self.modelForFolder(folder.guid, title: folder.title)
-    }
-
-    public func modelForFolder(guid: GUID) -> Deferred<Maybe<BookmarksModel>> {
-        return self.modelForFolder(guid, title: "")
-    }
-
-    public func modelForFolder(guid: GUID, title: String) -> Deferred<Maybe<BookmarksModel>> {
-        if guid == BookmarkRoots.FakeDesktopFolderGUID {
-            return self.modelForDesktopBookmarks()
-        }
-
-        let outputTitle = titleForSpecialGUID(guid) ?? title
-        return self.cursorForGUID(guid) >>== self.modelForCursor(guid, title: outputTitle)
-    }
-
-    public func modelForRoot() -> Deferred<Maybe<BookmarksModel>> {
-        return self.modelForFolder(BookmarkRoots.RootGUID)
-    }
-
-    public var nullModel: BookmarksModel {
-        let children = Cursor<BookmarkNode>(status: .Failure, msg: "Null model")
-        let folder = SQLiteBookmarkFolder(guid: "Null", title: "Null", children: children)
-        return BookmarksModel(modelFactory: self, root: folder)
-    }
-
-    public func isBookmarked(url: String) -> Deferred<Maybe<Bool>> {
-        return deferMaybe(false)        // TODO
-    }
-
-    public func remove(bookmark: BookmarkNode) -> Success {
-        return deferMaybe(DatabaseError(description: "Can't remove records from the mirror."))
-    }
-
-    public func removeByURL(url: String) -> Success {
-        return deferMaybe(DatabaseError(description: "Can't remove records from the mirror."))
-    }
-
-    public func clearBookmarks() -> Success {
-        // This doesn't make sense for synced data just yet.
-        log.debug("Mirror ignoring clearBookmarks.")
-        return deferMaybe(DatabaseError(description: "Can't remove records from the mirror."))
-    }
-
+extension SQLiteBookmarkMirrorStorage {
     // Used for resetting.
     public func wipeBookmarks() -> Success {
         return self.db.run("DELETE FROM \(TableBookmarksMirror)")
@@ -778,7 +739,7 @@ extension MergedSQLiteBookmarks: BookmarksModelFactory {
             return self.modelForRoot()
         }
 
-        return self.mirror.modelForFolder(folder)
+        return self.local.modelForFolder(folder)
     }
 
     public func modelForFolder(guid: String) -> Deferred<Maybe<BookmarksModel>> {
@@ -790,14 +751,14 @@ extension MergedSQLiteBookmarks: BookmarksModelFactory {
             return self.modelForRoot()
         }
 
-        return self.mirror.modelForFolder(guid, title: title)
+        return self.local.modelForFolder(guid, title: title)
     }
 
     public func modelForRoot() -> Deferred<Maybe<BookmarksModel>> {
         // Return a virtual model containing "Desktop bookmarks" prepended to the local mobile bookmarks.
         return self.local.folderForGUID(BookmarkRoots.MobileFolderGUID, title: BookmarksFolderTitleMobile)
             >>== { folder in
-                return self.mirror.extendWithDesktopBookmarksFolder(folder, factory: self)
+                return self.local.extendWithDesktopBookmarksFolder(folder, factory: self)
         }
     }
 
